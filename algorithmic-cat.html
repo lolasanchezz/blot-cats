@@ -1,0 +1,428 @@
+<title>Algorithmic Cat</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #edeae3;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    font-family: 'Courier New', Courier, monospace;
+    color: #100e0c;
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: #928c84;
+    margin-bottom: 6px;
+  }
+
+  h1 {
+    font-size: 15px;
+    font-weight: normal;
+    letter-spacing: 0.08em;
+  }
+
+  .canvas-wrap {
+    position: relative;
+    line-height: 0;
+  }
+
+  canvas {
+    display: block;
+    background: #fdfcfa;
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.04),
+      0 4px 16px rgba(0,0,0,0.09),
+      0 12px 48px rgba(0,0,0,0.06);
+  }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(253,252,250,0.9);
+    transition: opacity 0.35s ease;
+  }
+
+  #overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .dots-anim {
+    display: flex;
+    gap: 5px;
+  }
+
+  .dots-anim span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #100e0c;
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+
+  .dots-anim span:nth-child(2) { animation-delay: 0.18s; }
+  .dots-anim span:nth-child(3) { animation-delay: 0.36s; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50%       { opacity: 1;   transform: scale(1.1); }
+  }
+
+  .spinner-label {
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #928c84;
+  }
+
+  .footer {
+    margin-top: 22px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .meta {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #928c84;
+    min-width: 90px;
+  }
+
+  .meta.right { text-align: right; }
+
+  button {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    background: transparent;
+    border: 1px solid #100e0c;
+    color: #100e0c;
+    padding: 9px 22px;
+    cursor: pointer;
+    transition: background 0.13s, color 0.13s;
+    white-space: nowrap;
+  }
+
+  button:hover:not(:disabled) { background: #100e0c; color: #fdfcfa; }
+  button:focus-visible { outline: 2px solid #100e0c; outline-offset: 2px; }
+  button:disabled { opacity: 0.35; cursor: default; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dots-anim span { animation: none; opacity: 0.6; }
+    #overlay { transition: none; }
+  }
+</style>
+
+<header class="header">
+  <h1>algorithmic cat</h1>
+</header>
+
+<div class="canvas-wrap">
+  <canvas id="c" width="650" height="650"></canvas>
+  <div id="overlay">
+    <div class="spinner">
+      <div class="dots-anim">
+        <span></span><span></span><span></span>
+      </div>
+      <p class="spinner-label">Placing dots</p>
+    </div>
+  </div>
+</div>
+
+<footer class="footer">
+  <span class="meta" id="dot-count"></span>
+  <button id="btn" onclick="generate()" disabled>↺ Regenerate</button>
+  <span class="meta right">lola sanchez</span>
+</footer>
+
+<script>
+// ── Canvas ───────────────────────────────────────────────────────────────────
+const CANVAS_SIZE = 650;
+const BLOT_SIZE   = 125;
+const S           = CANVAS_SIZE / BLOT_SIZE;
+
+const canvas    = document.getElementById('c');
+const ctx       = canvas.getContext('2d');
+const overlay   = document.getElementById('overlay');
+const dotCountEl = document.getElementById('dot-count');
+const btn       = document.getElementById('btn');
+
+// ── bt library ───────────────────────────────────────────────────────────────
+const bt = {
+  randInRange:    (a, b) => Math.random() * (b - a) + a,
+  randIntInRange: (a, b) => Math.floor(Math.random() * (b - a + 1)) + a,
+
+  catmullRom(pts, res) {
+    const out = [], n = pts.length;
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(n - 1, i + 2)];
+      for (let j = 0; j < res; j++) {
+        const t = j / res, t2 = t*t, t3 = t2*t;
+        out.push([
+          0.5*((2*p1[0])+(-p0[0]+p2[0])*t+(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2+(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+          0.5*((2*p1[1])+(-p0[1]+p2[1])*t+(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2+(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3)
+        ]);
+      }
+    }
+    return out;
+  },
+
+  copy: v => JSON.parse(JSON.stringify(v)),
+
+  bounds(lines) {
+    let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+    const walk = v => {
+      if (!Array.isArray(v)) return;
+      if (typeof v[0] === 'number') {
+        x0=Math.min(x0,v[0]); y0=Math.min(y0,v[1]);
+        x1=Math.max(x1,v[0]); y1=Math.max(y1,v[1]);
+      } else v.forEach(walk);
+    };
+    lines.forEach(walk);
+    return { cb: [(x0+x1)/2, (y0+y1)/2], x: [x0,x1], y: [y0,y1] };
+  },
+
+  scale(ll, [sx, sy], center) {
+    if (!center) {
+      let sumX = 0, sumY = 0, count = 0;
+      for (const line of ll) {
+        if (!Array.isArray(line)) continue;
+        for (const pt of line)
+          if (typeof pt[0] === 'number') { sumX += pt[0]; sumY += pt[1]; count++; }
+      }
+      center = count > 0 ? [sumX / count, sumY / count] : [0, 0];
+    }
+    const [cx, cy] = center;
+    for (const line of ll)
+      if (Array.isArray(line))
+        for (const pt of line)
+          if (typeof pt[0] === 'number') {
+            pt[0] = cx + (pt[0] - cx) * sx;
+            pt[1] = cy + (pt[1] - cy) * sy;
+          }
+  },
+
+  translate(ll, [dx, dy]) {
+    for (const line of ll)
+      if (Array.isArray(line))
+        for (const pt of line)
+          if (typeof pt[0] === 'number') { pt[0]+=dx; pt[1]+=dy; }
+  },
+
+  resample(ll, spacing) {
+    for (let l = 0; l < ll.length; l++) {
+      const line = ll[l];
+      if (!Array.isArray(line) || line.length < 2) { if (line) line.length = 0; continue; }
+
+      const cum = [0];
+      for (let i = 1; i < line.length; i++) {
+        const dx = line[i][0]-line[i-1][0], dy = line[i][1]-line[i-1][1];
+        cum.push(cum[cum.length-1] + Math.sqrt(dx*dx + dy*dy));
+      }
+      const total = cum[cum.length-1];
+      const n = Math.floor(total / spacing);
+      const pts = [];
+      let si = 0;
+      for (let p = 0; p < n; p++) {
+        const td = p * spacing;
+        while (si < cum.length-2 && cum[si+1] < td) si++;
+        const segLen = cum[si+1] - cum[si];
+        const t = segLen > 0 ? (td - cum[si]) / segLen : 0;
+        pts.push([
+          line[si][0] + t*(line[si+1][0]-line[si][0]),
+          line[si][1] + t*(line[si+1][1]-line[si][1])
+        ]);
+      }
+      line.length = 0;
+      for (const p of pts) line.push(p);
+    }
+  }
+};
+
+// ── Blot host functions ───────────────────────────────────────────────────────
+function setDocDimensions(w, h) { /* canvas size is fixed */ }
+
+function drawLines(allLines) {
+  ctx.fillStyle = 'rgba(14, 11, 9, 0.87)';
+  for (const seg of allLines) {
+    if (!Array.isArray(seg) || !seg[0] || typeof seg[0][0] !== 'number') continue;
+    const [bx, by] = seg[0];
+    const px = bx * S;
+    const py = CANVAS_SIZE - by * S;
+    const radius = 0.85 + Math.random() * 0.65;
+    ctx.beginPath();
+    ctx.arc(px, py, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ── Main generation ───────────────────────────────────────────────────────────
+function generate() {
+  btn.disabled = true;
+  dotCountEl.textContent = '';
+  overlay.classList.remove('hidden');
+  // yield to browser so overlay renders before heavy work
+  requestAnimationFrame(() => setTimeout(run, 20));
+}
+
+function run() {
+  ctx.fillStyle = '#fdfcfa';
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+  /*
+   * @title: algorithmic cat
+   * @author: lola sanchez
+   * @snapshot: main.js
+   */
+
+  //params
+  const dotThickness = 0.3;
+  const masterDensityControl = 0.001;
+  const masterGapBetweenIterations = 0.00;
+  //
+
+  const width = 125;
+  const height = 125;
+  const padding = 2;
+  const allLines = [];
+  const r = bt.randInRange;
+  setDocDimensions(width, height);
+
+  const availableHeight = height - padding;
+  const availableWidth  = width  - padding;
+
+  //drawing the cat outline
+  const tallnessOfFace  = bt.randInRange((availableHeight * 0.3), (availableHeight * 0.5));
+  const widthOfFace     = availableWidth * (r(0.6, 1));
+
+  const widthOfEar      = bt.randInRange(widthOfFace * 1/3, widthOfFace * 1/6);
+  const widthOfHalfEar  = widthOfEar * (bt.randInRange(1/4, 1/2));
+  const paddingForCenter = ((availableWidth - widthOfFace) / 2);
+
+  const leftTopAnchor     = [paddingForCenter, tallnessOfFace];
+  const leftBottomAnchor  = [paddingForCenter, padding];
+  const topLeftEarAnchor  = [(paddingForCenter + widthOfHalfEar), availableHeight];
+  const leftMiddleAnchor  = [(paddingForCenter + widthOfEar), tallnessOfFace];
+  const rightMiddleAnchor = [((availableWidth - paddingForCenter) - widthOfEar), tallnessOfFace];
+  const topRightEarAnchor = [((availableWidth - paddingForCenter) - widthOfHalfEar), availableHeight];
+  const rightTopAnchor    = [(paddingForCenter + widthOfFace + padding), tallnessOfFace];
+  const rightBottomAnchor = [(paddingForCenter + widthOfFace + padding), padding];
+
+  const looseCatOutline = bt.catmullRom([
+    leftTopAnchor,
+    topLeftEarAnchor,
+    leftMiddleAnchor,
+    rightMiddleAnchor,
+    topRightEarAnchor,
+    rightTopAnchor,
+    rightBottomAnchor,
+    leftBottomAnchor,
+    leftTopAnchor
+  ], 100);
+
+  //making the bounding box for the eyes
+  const boxOffset = tallnessOfFace * (r(1/6, 1/5));
+  const boxWidth  = widthOfFace    * (r(1/3, 1));
+  const boxHeight = tallnessOfFace * (r(1/3, 1/1.75));
+
+  const leftEyeBox   = (paddingForCenter + ((widthOfFace - boxWidth) / 2));
+  const rightEyeBoxP = leftEyeBox + boxWidth;
+
+  //making the eyes
+  const eyeWidth    = boxWidth  * (r(0.3, 0.4));
+  const eyeHeight   = boxHeight * (r(0.5, 0.7));
+  const eyePadding  = eyeWidth  * 0.15;
+  const eyePaddingY = eyeHeight * 0.15;
+
+  const outerEyeLeft = bt.catmullRom([
+    [leftEyeBox + eyePadding, (boxOffset + eyeHeight)],
+    [leftEyeBox + (eyeWidth), (boxOffset + eyeHeight)],
+    [leftEyeBox + (eyeWidth), boxOffset + eyePaddingY],
+    [leftEyeBox + eyePadding, boxOffset + eyePaddingY],
+    [leftEyeBox + eyePadding, boxOffset + eyeHeight]
+  ], 100);
+
+  const outerEyeRight = bt.catmullRom([
+    [rightEyeBoxP - eyePadding, (boxOffset + eyeHeight)],
+    [rightEyeBoxP - eyeWidth,   (boxOffset + eyeHeight)],
+    [rightEyeBoxP - eyeWidth,   (boxOffset + eyePaddingY)],
+    [rightEyeBoxP - eyePadding, (boxOffset + eyePaddingY)],
+    [rightEyeBoxP - eyePadding, (boxOffset + eyeHeight)]
+  ], 100);
+
+  //making inner eyes
+  const eyeScale = 0.8;
+
+  const innerEyeLeft = bt.copy(outerEyeLeft);
+  bt.scale([innerEyeLeft], [eyeScale, eyeScale]);
+  bt.translate([innerEyeLeft], [eyeWidth * ((1 - eyeScale) / 2), eyeHeight * ((1 - eyeScale) / 2)]);
+
+  const innerEyeRight = bt.copy(outerEyeRight);
+  bt.scale([innerEyeRight], [eyeScale, eyeScale]);
+  bt.translate([innerEyeRight], [-1 * (eyeWidth * ((1 - eyeScale) / 2)), eyeHeight * ((1 - eyeScale) / 2)]);
+
+  //attempting to stipple inside circles
+  function stippleV1(shape, Density, noise, gapBetweenIterations) {
+    const density = Density + masterDensityControl;
+    gapBetweenIterations = gapBetweenIterations + masterGapBetweenIterations;
+    const stiShape = bt.copy(shape);
+    let iters = 0;
+    while (stiShape.length > 2 && iters < 300) {
+      iters++;
+      bt.scale([stiShape], [gapBetweenIterations, gapBetweenIterations]);
+      bt.resample([stiShape], density);
+      for (let i = 0; i < stiShape.length; i++) {
+        let deviationX = r(0.5, noise);
+        let deviationY = r(0.5, noise);
+        let newRightLine = [
+          [stiShape[i][0] + deviationX,               stiShape[i][1] + deviationY],
+          [stiShape[i][0] + dotThickness + deviationX, stiShape[i][1] + dotThickness + deviationY]
+        ];
+        allLines.push(newRightLine);
+      }
+    }
+  }
+
+  stippleV1(innerEyeLeft,    0.17, 2, 0.764);
+  stippleV1(innerEyeRight,   0.17, 2, 0.763);
+  stippleV1(outerEyeRight,   0.25, 2, 0.550);
+  stippleV1(outerEyeLeft,    0.25, 2, 0.550);
+  stippleV1(looseCatOutline,  0.1, 6, 0.903);
+
+  drawLines(allLines);
+
+  dotCountEl.textContent = allLines.length.toLocaleString() + ' dots';
+  overlay.classList.add('hidden');
+  btn.disabled = false;
+}
+
+generate();
+</script>
